@@ -1,0 +1,33 @@
+# Build output
+target/
+dist/
+*.jar
+*.war
+node_modules/
+
+# Local environment
+.env
+.env.local
+*.local
+
+# Embedding model binaries (fetch with backend/scripts/fetch-embedding-model.sh)
+backend/models/*.onnx
+backend/models/tokenizer.json
+backend/models/.cache/
+
+# Editors and OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Logs
+*.log
+
+# Source-of-truth PDFs — deliberately NOT published.
+# Supply them yourself: drop the HeiFinance PDFs into knowledge-base/
+# (see knowledge-base/README.md). The folder itself is kept so a fresh clone
+# still has the mount point the Docker build and Compose files expect.
+knowledge-base/*
+!knowledge-base/.gitkeep
+!knowledge-base/README.md

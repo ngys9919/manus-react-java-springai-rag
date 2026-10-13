@@ -1,0 +1,40 @@
+# HeiFinance Knowledge Assistant — production reverse proxy.
+#
+# SITE_ADDRESS comes from the environment (docker-compose.prod.yml). Use a real
+# domain, e.g. support.heifinance.example, and Caddy obtains and renews a
+# Let's Encrypt certificate automatically — no certbot, no cron job.
+#
+# Until DNS resolves to the server, Caddy cannot issue a certificate. For a
+# first boot without a domain, set SITE_ADDRESS=:80 to serve plain HTTP.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# The assistant is internal; keep it out of search indexes.
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+
+	# Long-lived caches for the hashed Vite bundle, no-cache for the shell.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	@shell path / /c/* /index.html
+	header @shell Cache-Control "no-cache"
+
+	reverse_proxy backend:8080 {
+		# Ingestion runs on first boot and answers can take a while; do not cut
+		# a slow generation short.
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

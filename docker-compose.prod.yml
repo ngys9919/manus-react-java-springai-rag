@@ -1,0 +1,102 @@
+# =============================================================================
+# HeiFinance Knowledge Assistant — production stack
+#
+#   Caddy (:80/:443, automatic Let's Encrypt TLS)
+#     └─ backend (Spring Boot + Spring AI, internal :8080)
+#          └─ postgres (pgvector/pg16, internal :5432)
+#
+# Only Caddy is reachable from the internet. The application port and the
+# database have no host mapping, so neither is exposed even if UFW is relaxed.
+#
+# Usage (from the repository root):
+#   cp .env.example .env      # then fill in the real values
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# This file is the one systemd starts; see deploy/heifinance-rag.service.
+# =============================================================================
+name: heifinance-rag
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: heifinance_rag
+      POSTGRES_USER: heifinance
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    # Keep the default configuration small enough for a 1 GB machine.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=40
+      - -c
+      - effective_cache_size=256MB
+    volumes:
+      - heifinance-pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heifinance -d heifinance_rag"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/heifinance_rag
+      DB_USERNAME: heifinance
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      # Required: the assistant calls this OpenAI-compatible endpoint.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-5-mini}
+      OPENAI_MAX_COMPLETION_TOKENS: ${OPENAI_MAX_COMPLETION_TOKENS:-2048}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
+      KNOWLEDGE_BASE_PATH: /app/knowledge-base
+      INGEST_ON_STARTUP: "true"
+      SERVER_PORT: "8080"
+      # The browser reaches the app through Caddy on the public origin.
+      HEIFINANCE_ALLOWED_ORIGIN_PATTERNS: ${HEIFINANCE_ALLOWED_ORIGIN_PATTERNS:-*}
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=65 -XX:+UseSerialGC"
+    # The corpus ships inside the image, so a server deployment needs no extra
+    # files. To update a PDF without rebuilding, uncomment the mount below and
+    # populate the host folder — an empty folder would shadow the bundled corpus.
+    # volumes:
+    #   - ./knowledge-base:/app/knowledge-base:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/system/health || exit 1"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 180s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # A real domain enables automatic HTTPS. Use ":80" for a first HTTP-only boot.
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  heifinance-pgdata:
+  caddy-data:
+  caddy-config:

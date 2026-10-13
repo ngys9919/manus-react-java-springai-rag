@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: heifinance-postgres
+    environment:
+      POSTGRES_DB: heifinance_rag
+      POSTGRES_USER: heifinance
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-heifinance}
+    ports:
+      - "5432:5432"
+    volumes:
+      - heifinance-pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heifinance -d heifinance_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: heifinance-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/heifinance_rag
+      DB_USERNAME: heifinance
+      DB_PASSWORD: ${DB_PASSWORD:-heifinance}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY before running docker compose}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-5-mini}
+      KNOWLEDGE_BASE_PATH: /app/knowledge-base
+      INGEST_ON_STARTUP: "true"
+      SERVER_PORT: "8080"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/system/health || exit 1"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 120s
+
+volumes:
+  heifinance-pgdata:

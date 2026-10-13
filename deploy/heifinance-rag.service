@@ -1,0 +1,32 @@
+# HeiFinance Knowledge Assistant — auto-start on boot.
+#
+# Tier upgrades, backup restores and manual restarts all reboot the machine.
+# Without this unit the stack stays down after a reboot and looks broken.
+#
+# Install:
+#   sudo cp deploy/heifinance-rag.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now heifinance-rag
+
+[Unit]
+Description=HeiFinance Knowledge Assistant (Spring Boot + PostgreSQL/pgvector)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/heifinance-rag
+
+# Rebuild if the image is missing, then start in the background.
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up -d --build
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
+
+# Image builds and first-boot ingestion take minutes; do not time out.
+TimeoutStartSec=0
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target

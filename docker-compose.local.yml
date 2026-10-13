@@ -1,0 +1,76 @@
+# =============================================================================
+# HeiFinance Knowledge Assistant — run the published image on your own machine
+#
+# Nothing is built here: this pulls the image from Docker Hub and starts it next
+# to a PostgreSQL/pgvector container. Use this if you do not want to host it
+# permanently on a server.
+#
+#   1. cp .env.example .env   and fill in OPENAI_API_KEY (and DB_PASSWORD)
+#   2. docker compose -f docker-compose.local.yml up -d
+#   3. open http://localhost:8080
+#
+# Pull a specific build with:  IMAGE=youruser/heifinance-rag:1.0.0 docker compose ...
+# =============================================================================
+name: heifinance-rag-local
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: heifinance_rag
+      POSTGRES_USER: heifinance
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=40
+    volumes:
+      - heifinance-pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heifinance -d heifinance_rag"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  backend:
+    image: ${IMAGE:-ngys9919/heifinance-rag:1.0.0}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/heifinance_rag
+      DB_USERNAME: heifinance
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-5-mini}
+      OPENAI_MAX_COMPLETION_TOKENS: ${OPENAI_MAX_COMPLETION_TOKENS:-2048}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
+      KNOWLEDGE_BASE_PATH: /app/knowledge-base
+      INGEST_ON_STARTUP: "true"
+      SERVER_PORT: "8080"
+      HEIFINANCE_ALLOWED_ORIGIN_PATTERNS: ${HEIFINANCE_ALLOWED_ORIGIN_PATTERNS:-*}
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=65 -XX:+UseSerialGC"
+    # The corpus ships inside the image, so nothing extra is needed here.
+    # To override it without rebuilding, uncomment the mount below — but the host
+    # folder must then contain the PDFs, because an empty folder would shadow the
+    # bundled corpus and the assistant would index nothing.
+    # volumes:
+    #   - ./knowledge-base:/app/knowledge-base:ro
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/system/health || exit 1"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 180s
+
+volumes:
+  heifinance-pgdata:

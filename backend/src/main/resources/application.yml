@@ -1,0 +1,90 @@
+server:
+  port: ${SERVER_PORT:8080}
+  compression:
+    enabled: true
+    mime-types: application/json,text/html,text/css,application/javascript,text/plain
+
+spring:
+  application:
+    name: heifinance-rag-backend
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/heifinance_rag}
+    username: ${DB_USERNAME:heifinance}
+    password: ${DB_PASSWORD:heifinance}
+    hikari:
+      maximum-pool-size: 12
+      pool-name: heifinance-rag-pool
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
+      continue-on-error: false
+  web:
+    resources:
+      # The built Vite SPA is served from frontend/dist for a single-origin deployment.
+      static-locations: ${SPA_LOCATIONS:classpath:/static/,file:../frontend/dist/,file:./frontend/dist/}
+  ai:
+    model:
+      chat: openai
+      # No embeddings endpoint is exposed by the configured LLM gateway, so embeddings
+      # are produced locally by the ONNX all-MiniLM-L6-v2 model (384 dimensions).
+      embedding: transformers
+    openai:
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+      api-key: ${OPENAI_API_KEY:not-configured}
+      chat:
+        options:
+          model: ${OPENAI_CHAT_MODEL:gpt-5-mini}
+          max-completion-tokens: ${OPENAI_MAX_COMPLETION_TOKENS:2048}
+          reasoning-effort: ${OPENAI_REASONING_EFFORT:low}
+    embedding:
+      transformer:
+        onnx:
+          model-uri: ${EMBEDDING_MODEL_URI:file:./models/model.onnx}
+        tokenizer:
+          uri: ${EMBEDDING_TOKENIZER_URI:file:./models/tokenizer.json}
+        cache:
+          enabled: true
+          directory: ${EMBEDDING_CACHE_DIR:./models/.cache}
+    vectorstore:
+      pgvector:
+        table-name: heifinance_vectors
+        schema-name: public
+        dimensions: 384
+        distance-type: COSINE_DISTANCE
+        index-type: HNSW
+        initialize-schema: true
+        max-document-batch-size: 200
+
+heifinance:
+  web:
+    # A browser sends an Origin header on same-origin POSTs, so the packaged app must accept its own
+    # origin. Narrow this to your own host(s) if the API sits behind a gateway.
+    allowed-origin-patterns: ${HEIFINANCE_ALLOWED_ORIGIN_PATTERNS:*}
+    # Where the built SPA lives. WebConfig reads THIS property; the container image sets
+    # SPA_LOCATIONS=file:/app/spa/. Keep it in step with the image if you move the bundle.
+    static-locations: ${SPA_LOCATIONS:classpath:/static/,file:../frontend/dist/,file:./frontend/dist/}
+  rag:
+    knowledge-base-path: ${KNOWLEDGE_BASE_PATH:../knowledge-base}
+    ingest-on-startup: ${INGEST_ON_STARTUP:true}
+    chunk:
+      size: ${CHUNK_SIZE:200}
+      min-chunk-size-chars: ${MIN_CHUNK_SIZE_CHARS:80}
+      min-chunk-length-to-embed: ${MIN_CHUNK_LENGTH_TO_EMBED:20}
+      max-num-chunks: ${MAX_NUM_CHUNKS:10000}
+    retrieval:
+      top-k: ${RETRIEVAL_TOP_K:12}
+      similarity-threshold: ${RETRIEVAL_SIMILARITY_THRESHOLD:0.25}
+      max-context-chunks: ${RETRIEVAL_MAX_CONTEXT_CHUNKS:12}
+      max-per-document: ${RETRIEVAL_MAX_PER_DOCUMENT:6}
+    history:
+      max-turns: ${HISTORY_MAX_TURNS:8}
+    assistant:
+      name: ${ASSISTANT_NAME:HeiFinance Knowledge Assistant}
+
+logging:
+  level:
+    root: INFO
+    com.heifinance.rag: ${LOG_LEVEL:INFO}
+    com.heifinance.rag.service.ChatService: ${CHAT_LOG_LEVEL:INFO}
+    org.springframework.ai: WARN
